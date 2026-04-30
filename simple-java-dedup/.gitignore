@@ -1,0 +1,7 @@
+target/
+test-results/
+coverage-reports/
+docker-compose-tmp.yaml
+jacoco.exec
+*.log
+keploy-logs.txt

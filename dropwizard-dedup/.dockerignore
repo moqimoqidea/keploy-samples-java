@@ -1,0 +1,13 @@
+target/*
+!target/dropwizard-dedup.jar
+!target/keploy-sdk.jar
+!target/jacocoagent.jar
+!target/classes/
+!target/classes/**
+!target/dependency/
+!target/dependency/**
+keploy/reports
+dedupData.yaml
+duplicates.yaml
+replay-*.log
+dedup-*.log

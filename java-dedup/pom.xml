@@ -13,13 +13,12 @@
 
     <groupId>io.keploy.samples</groupId>
     <artifactId>java-dedup</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>java-dedup</name>
     <description>Keploy Java dynamic deduplication sample</description>
 
     <properties>
         <java.version>1.8</java.version>
-        <keploy.sdk.version>2.0.0</keploy.sdk.version>
         <jacoco.version>0.8.12</jacoco.version>
     </properties>
 
@@ -28,14 +27,10 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <dependency>
-            <groupId>io.keploy</groupId>
-            <artifactId>keploy-sdk</artifactId>
-            <version>${keploy.sdk.version}</version>
-        </dependency>
     </dependencies>
 
     <build>
+        <finalName>java-dedup</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
@@ -81,4 +76,44 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>copy-keploy-agent</id>
+            <activation>
+                <property>
+                    <name>keploy.agent.version</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <version>3.6.1</version>
+                        <executions>
+                            <execution>
+                                <id>copy-keploy-java-agent</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>copy</goal>
+                                </goals>
+                                <configuration>
+                                    <artifactItems>
+                                        <artifactItem>
+                                            <groupId>io.keploy</groupId>
+                                            <artifactId>keploy-sdk</artifactId>
+                                            <version>${keploy.agent.version}</version>
+                                            <outputDirectory>${project.build.directory}</outputDirectory>
+                                            <destFileName>keploy-sdk.jar</destFileName>
+                                        </artifactItem>
+                                    </artifactItems>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
