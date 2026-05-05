@@ -1,0 +1,91 @@
+# restheart-mongo sample compose. RESTHeart 9.x + MongoDB 7 on a
+# fixed subnet, every name env-driven so multiple matrix cells
+# can run in parallel on the same docker daemon.
+services:
+  restheart:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${RESTHEART_APP_CONTAINER:-restheart_app}
+    init: true
+    stop_grace_period: 5s
+    ports:
+      - "${RESTHEART_APP_PORT:-8080}:8080"
+    environment:
+      # RHO is RESTHeart's runtime config-override syntax:
+      #   key->value  pairs separated by ';'
+      # We override the default mongo URL (which the upstream image
+      # points at host.docker.internal — irrelevant in compose),
+      # explicitly bind /http-listener/host to 0.0.0.0 (without it
+      # the upstream image binds localhost and is unreachable from
+      # the host port mapping), AND pin /jwtConfigProvider/key to
+      # a fixed secret. The default `key: null` makes RESTHeart
+      # generate a fresh random HS256 secret on every container
+      # start. Recorded JWT bearers carry an HS256 signature over
+      # the payload using that secret, so a fresh-container replay
+      # phase rejects the recorded bearer with 401 even though
+      # --freezeTime keeps `exp` valid. Pinning the secret keeps
+      # the bearer signature verifiable across record→replay
+      # container restarts (deterministic key, deterministic JWT).
+      RHO: '/mclient/connection-string->"mongodb://${RESTHEART_MONGO_IP:-172.36.0.10}:27017";/http-listener/host->"0.0.0.0";/core/log-level->"INFO";/jwtConfigProvider/key->"keploy-fixed-jwt-secret-for-deterministic-recordings";/mongoAclAuthorizer/cache-enabled->false'
+      # Bound RESTHeart's JVM heap. RESTHeart 9.x's default uses
+      # `MaxRAMPercentage=25` of cgroup memory, which on a typical
+      # Woodpecker runner cgroup (~8GB) lands ~2GB heap. With three
+      # restheart matrix cells running concurrent on the same
+      # runner alongside parse-server / umami / doccano cells, the
+      # total memory pressure triggers cgroup OOM and the kernel
+      # SIGKILLs lighter processes (bash, curl) mid-bootstrap —
+      # observed in keploy/enterprise pipeline 3721/26 (cell
+      # record-stable-replay-pr) where `flow.sh bootstrap` got
+      # killed (exit 137) right after RESTHeart came up. Capping
+      # heap at 512m keeps each cell's footprint under ~700MB
+      # (heap + native + mongo) so the runner can host all three
+      # restheart cells plus the other lanes' cells in parallel.
+      # 512m is comfortable for the record/replay workload (peak
+      # observed at ~280MB in single-cell local runs).
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx512m"
+      # Note on /mongoAclAuthorizer/cache-enabled->false in RHO:
+      # RESTHeart's mongoAclAuthorizer caches ACL rules with a 5s
+      # TTL backed by Caffeine, which uses System.nanoTime() to
+      # measure expiry. When the lane runs `keploy test --freezeTime`,
+      # the LD_PRELOADed clock-shim intercepts clock_gettime/
+      # gettimeofday — and Caffeine's nanoTime ticker is also
+      # frozen — so the cache TTL never expires. flow.sh's `sleep 6`
+      # between an `acl` rule POST and the writer-permission test
+      # works at record time (the wall clock advances and the cache
+      # reloads), but at replay the cache stays loaded with whatever
+      # state it had at the first request and never picks up the
+      # newly-POSTed rule. Result: writer gets 403 at replay
+      # despite recorded 200. Disabling the cache makes ACL rules
+      # read-through from mongo on every request — small perf cost,
+      # but eliminates the time-freeze x cache-ttl interaction.
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - restheart-net
+
+  mongo:
+    image: mongo:7
+    container_name: ${RESTHEART_MONGO_CONTAINER:-restheart_mongo}
+    stop_grace_period: 5s
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - restheart-mongo-data:/data/db
+    networks:
+      restheart-net:
+        ipv4_address: ${RESTHEART_MONGO_IP:-172.36.0.10}
+
+networks:
+  restheart-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${RESTHEART_NETWORK_SUBNET:-172.36.0.0/24}
+
+volumes:
+  restheart-mongo-data:
